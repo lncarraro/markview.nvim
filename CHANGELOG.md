@@ -1,5 +1,16 @@
 # Changelog
 
+## [28.3.1](https://github.com/OXY2DEV/markview.nvim/compare/v28.3.0...v28.3.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* **renderer, typst:** Fixed list item marker not concealing ([fbe5ec7](https://github.com/OXY2DEV/markview.nvim/commit/fbe5ec7d127ab3435ffd62740a7b27e7fabf42dc)), closes [#503](https://github.com/OXY2DEV/markview.nvim/issues/503)
+* **renderers, markdown, tables:** Fixed handling of `:text:` for non-emoji ([3d8f688](https://github.com/OXY2DEV/markview.nvim/commit/3d8f68812262b516d533acf603c2ecaf72f8edb5)), closes [#505](https://github.com/OXY2DEV/markview.nvim/issues/505)
+* **renderers, markdown, tables:** Fixed incorrect rendering of Obsidian-style links ([301e431](https://github.com/OXY2DEV/markview.nvim/commit/301e431c7b618235f5447d54465c70934bd33668)), closes [#507](https://github.com/OXY2DEV/markview.nvim/issues/507)
+* **tostring:** Correctly handle spaces in link source ([576e50f](https://github.com/OXY2DEV/markview.nvim/commit/576e50fa99091ff47a9920e1b6ef94b2a7c2f036))
+* **tostring:** respect CommonMark flanking for word-attached emphasis ([#506](https://github.com/OXY2DEV/markview.nvim/issues/506)) ([93aab4f](https://github.com/OXY2DEV/markview.nvim/commit/93aab4f3216bbebed1de117ff7a655c704985b43))
+
 ## [28.3.0](https://github.com/OXY2DEV/markview.nvim/compare/v28.2.0...v28.3.0) (2026-05-16)
 
 
