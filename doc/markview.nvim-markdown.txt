@@ -1153,6 +1153,7 @@ tables                                           *markview.nvim-markdown.tables*
 	---
 	---@field enable boolean
 	---@field strict boolean When `true`, leading & trailing whitespaces are not considered part of the cell.
+	---@field overflow? "horizontal" | "raw" Behavior when the rendered table is wider than the available text area.
 	---
 	---@field block_decorator boolean Whether to draw top & bottom border.
 	---@field use_virt_lines boolean Whether to use virtual lines for the borders.
@@ -1166,19 +1167,23 @@ Changes how tables are shown.
 Demo {img:3}
 
 ▋{!IMPORTANT]
-▋ When using `wrap`, tables are partially rendered to prevent text wrapping issues.
-▋ This is not a bug.
+▋ Table overflow is decided from the rendered natural width, including inline
+▋ decorations and excluding concealed Markdown syntax.
 
-╭─────────────────┬──────────────────╮
-│  `wrap = true`    │  `wrap = false`    │
-├─────────────────┼──────────────────┤
-│ wrap {img:4}    │ nowrap {img:5}   │
-╰─────────────────┴──────────────────╯
+`overflow = "horizontal"` is the default. When a rendered table is wider than
+its window, Markview temporarily disables `wrap` for that window and renders the
+full table at its natural width. Use Neovim's horizontal scrolling to inspect the
+entire table. The original window-local `wrap` value is restored when preview
+rendering is disabled or detached.
+
+`overflow = "raw"` preserves the previous behavior and leaves genuinely wide
+tables as raw Markdown.
 
 >lua
 	tables = {
 	    enable = true,
 	    strict = false,
+	    overflow = "horizontal",
 	
 	    block_decorator = true,
 	    use_virt_lines = false,
@@ -1237,7 +1242,5 @@ Images ~
 1: ./images/markdown/markview.nvim-markdown.block_quotes.png
 2: ./images/markdown/markview.nvim-markdown.code_blocks.png
 3: ./images/markdown/markview.nvim-markdown.tables.png
-4: https://github.com/OXY2DEV/markview.nvim/blob/images/v27/markview.nvim-wrap.png
-5: https://github.com/OXY2DEV/markview.nvim/blob/images/v27/markview.nvim-nowrap.png
 
 vim:ft=help:textwidth=80:tabstop=4:noexpandtab:
