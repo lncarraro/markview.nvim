@@ -35,3 +35,15 @@ Markview preview must restore the original `wrap` value.
 
 With `markdown.tables.overflow = "raw"`, the same genuinely overflowing table
 must remain raw Markdown and must not change the window-local `wrap` value.
+
+When Tree-sitter does not emit `markdown_inline` nodes for link content inside a
+table cell, the table renderer must display the same decorated representation it
+used for width measurement. The raw link destination must not remain visible,
+and every row separator must stay at the same screen column while scrolling.
+Cells already covered by the normal inline renderer must not receive a duplicate
+table-level decoration.
+
+Projected horizontal rows must use overlay virtual text rather than concealing
+the complete source line. Normal-mode cursor movement must continue to traverse
+the underlying Markdown columns instead of appearing permanently at the end of
+the projected table. Moving left or right must not change table alignment.
