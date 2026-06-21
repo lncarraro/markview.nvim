@@ -6,6 +6,21 @@ local function window_is_valid (window)
 	return type(window) == "number" and vim.api.nvim_win_is_valid(window);
 end
 
+--- Returns the effective wrap state used for table overflow decisions.
+--- Temporary horizontal mode must not make later tables in the same render pass
+--- behave as though the user originally configured `nowrap`.
+---@param window integer
+---@return boolean
+table_overflow.uses_wrap = function (window)
+	if not window_is_valid(window) then
+		return false;
+	elseif vim.w[window].__mkv_table_overflow_active == true then
+		return vim.w[window].__mkv_table_overflow_wrap == true;
+	end
+
+	return vim.wo[window].wrap == true;
+end
+
 --- Enables lossless horizontal table rendering in one window.
 ---
 --- The original `wrap` value is cached before the window is changed. Rendering

@@ -25,6 +25,34 @@ end
 ---@type table[]
 markdown.cache = {};
 
+--- Inline nodes included in the current renderer pass, keyed by buffer.
+---@type table<integer, markview.parsed.markdown_inline[]>
+markdown.inline_content = {};
+
+--- Source ranges rendered as single projected rows for horizontal scrolling.
+---@type table<integer, { row_start: integer, row_end: integer }[]>
+markdown.projected_table_ranges = {};
+
+---@param buffer integer
+---@param range markview.parsed.range?
+---@return boolean
+markdown.is_projected_table_range = function (buffer, range)
+	if not range then
+		return false;
+	end
+
+	for _, projected in ipairs(markdown.projected_table_ranges[buffer] or {}) do
+		if
+			range.row_start >= projected.row_start and
+			range.row_end <= projected.row_end
+		then
+			return true;
+		end
+	end
+
+	return false;
+end
+
 ---@type integer Namespace for markdown.
 markdown.ns = vim.api.nvim_create_namespace("markview/markdown");
 
@@ -1528,6 +1556,7 @@ markdown.table = function (buffer, item)
 
 	local is_wrapped = false;
 	local check_overflow = false;
+	local horizontal_projection = false;
 	local overflow_mode = config and config.overflow or "horizontal";
 
 	if overflow_mode ~= "horizontal" and overflow_mode ~= "raw" then
@@ -1546,7 +1575,7 @@ markdown.table = function (buffer, item)
 		if type(win) ~= "number" then
 			--- Window doesn't exist.
 			return;
-		elseif vim.wo[win].wrap == true then
+		elseif require("markview.table_overflow").uses_wrap(win) then
 			check_overflow = true;
 			is_wrapped = overflow_mode == "raw";
 			dbg.log("table", ("row=%d wrap=true → entering width guard (overflow_mode=%s; wrapped_renderer=%s)"):format(
@@ -1582,12 +1611,12 @@ markdown.table = function (buffer, item)
 		strict = false;
 	end
 
-	---@type integer[] Visible column widths(may be inaccurate).
+	---@type integer[] Maximum rendered display width for each column.
 	local col_widths = {};
 
-	--- Holds text for the different table cells.
+	--- Holds rendered display widths for the different table cells.
 	---
-	---@type { header: string[], rows: string[][] }
+	---@type { header: integer[], rows: integer[][] }
 	local visible_texts = {
 		header = {},
 		rows = {}
@@ -1595,6 +1624,12 @@ markdown.table = function (buffer, item)
 
 	---@type integer[] Maximum raw Markdown display widths, retained for diagnostics.
 	local raw_widths = {};
+
+	---@type { header: string[], rows: string[][] }
+	local rendered_texts = {
+		header = {},
+		rows = {}
+	};
 
 	local md_tostring = require("markview.renderers.markdown.tostring");
 
@@ -1607,6 +1642,7 @@ markdown.table = function (buffer, item)
 	---@param text string
 	---@param render_inline boolean
 	---@return integer
+	---@return string
 	local function measure_cell (section, source_row, column, text, render_inline)
 		local rendered = render_inline and md_tostring.tostring(buffer, text) or text;
 		local rendered_width = vim.fn.strdisplaywidth(rendered);
@@ -1631,7 +1667,7 @@ markdown.table = function (buffer, item)
 			rendered_width
 		));
 
-		return rendered_width;
+		return rendered_width, rendered;
 	end
 
 	---@type integer Current column number.
@@ -1639,8 +1675,9 @@ markdown.table = function (buffer, item)
 
 	for _, col in ipairs(item.header) do
 		if col.class == "column" then
-			local width = measure_cell("header", range.row_start, c, col.text, true);
+			local width, rendered = measure_cell("header", range.row_start, c, col.text, true);
 			table.insert(visible_texts.header, width);
+			table.insert(rendered_texts.header, rendered);
 
 			c = c + 1;
 		end
@@ -1657,12 +1694,14 @@ markdown.table = function (buffer, item)
 
 	for r, row in ipairs(item.rows) do
 		c = 1;
-		table.insert(visible_texts.rows, {})
+		table.insert(visible_texts.rows, {});
+		table.insert(rendered_texts.rows, {});
 
 		for _, col in ipairs(row) do
 			if col.class == "column" then
-				local width = measure_cell("row", range.row_start + 1 + r, c, col.text, true);
+				local width, rendered = measure_cell("row", range.row_start + 1 + r, c, col.text, true);
 				table.insert(visible_texts.rows[r], width);
+				table.insert(rendered_texts.rows[r], rendered);
 
 				c = c + 1;
 			end
@@ -1724,6 +1763,7 @@ markdown.table = function (buffer, item)
 			--- disabled only for this window. Neovim can then scroll horizontally
 			--- without losing or truncating cell content.
 			is_wrapped = false;
+			horizontal_projection = true;
 			dbg.log("table", ("row=%d → HORIZONTAL (rendered_table_width=%d > available_width=%d; overflow=%d; window=%d wrap=false)"):format(
 				range.row_start,
 				rendered_table_width,
@@ -1740,6 +1780,126 @@ markdown.table = function (buffer, item)
 			math.max(0, available_width - rendered_table_width),
 			rendered_table_width > available_width and "horizontal" or "fit",
 			raw_table_width
+		));
+	end
+
+	if horizontal_projection then
+		markdown.projected_table_ranges[buffer] = markdown.projected_table_ranges[buffer] or {};
+		table.insert(markdown.projected_table_ranges[buffer], {
+			row_start = range.row_start,
+			row_end = range.row_end
+		});
+
+		require("markview.renderers.markdown.table_projection").render(
+			buffer,
+			markdown.ns,
+			item,
+			config,
+			rendered_texts,
+			col_widths,
+			strict
+		);
+
+		dbg.log("table", ("row=%d → PROJECTED_ROWS (source range=%d:%d)"):format(
+			range.row_start,
+			range.row_start,
+			range.row_end
+		));
+		return;
+	end
+
+	--- Checks whether the normal inline renderer owns content inside this cell
+	--- during the current render pass.
+	---@param row integer
+	---@param col_start integer
+	---@param col_end integer
+	---@return boolean
+	---@return string?
+	local function has_inline_node (row, col_start, col_end)
+		for _, node in ipairs(markdown.inline_content[buffer] or {}) do
+			local node_range = node.range;
+
+			if
+				node_range and
+				node_range.row_start == row and
+				node_range.row_end == row and
+				node_range.col_start >= col_start and
+				node_range.col_end <= col_end
+			then
+				return true, node.class;
+			end
+		end
+
+		return false, nil;
+	end
+
+	--- Renders the representation used for width measurement when Tree-sitter
+	--- does not expose inline nodes for a table cell. This keeps table geometry
+	--- and the actual screen content identical without duplicating decorations
+	--- already owned by the normal inline renderer.
+	---@param row integer
+	---@param part markview.parsed.markdown.tables.column
+	---@param rendered string
+	local function render_cell_content (row, part, rendered)
+		if rendered == part.text then
+			return;
+		end
+
+		local col_start = range.col_start + part.col_start;
+		local col_end = range.col_start + part.col_end;
+		local handled, inline_class = has_inline_node(row, col_start, col_end);
+
+		if handled then
+			dbg.log("table-cell-render", ("table_row=%d source_row=%d col_start=%d col_end=%d owner=inline class=%s"):format(
+				range.row_start,
+				row,
+				col_start,
+				col_end,
+				tostring(inline_class)
+			));
+			return;
+		end
+
+		local leading = string.match(part.text, "^%s*") or "";
+		local trailing = string.match(part.text, "%s*$") or "";
+		local rendered_inner = rendered;
+
+		if leading ~= "" and string.sub(rendered_inner, 1, #leading) == leading then
+			rendered_inner = string.sub(rendered_inner, #leading + 1);
+		end
+
+		if trailing ~= "" and string.sub(rendered_inner, -#trailing) == trailing then
+			rendered_inner = string.sub(rendered_inner, 1, #rendered_inner - #trailing);
+		end
+
+		local inner_start = col_start + #leading;
+		local inner_end = col_end - #trailing;
+
+		if inner_start >= inner_end then
+			return;
+		end
+
+		vim.api.nvim_buf_set_extmark(buffer, markdown.ns, row, inner_start, {
+			undo_restore = false, invalidate = true,
+			end_col = inner_end,
+			conceal = "",
+
+			virt_text_pos = "inline",
+			virt_text = {
+				{ rendered_inner }
+			},
+
+			right_gravity = false,
+			hl_mode = "combine"
+		});
+
+		dbg.log("table-cell-render", ("table_row=%d source_row=%d col_start=%d col_end=%d owner=table raw=%q rendered=%q"):format(
+			range.row_start,
+			row,
+			inner_start,
+			inner_end,
+			string.sub(part.text, #leading + 1, #part.text - #trailing),
+			rendered_inner
 		));
 	end
 
@@ -1897,6 +2057,8 @@ markdown.table = function (buffer, item)
 		elseif part.class == "column" then
 			local visible_width = visible_texts.header[c];
 			local column_width  = col_widths[c];
+
+			render_cell_content(range.row_start, part, rendered_texts.header[c]);
 
 			if strict then
 				local before = string.match(part.text, "^%s*");
@@ -2295,6 +2457,12 @@ markdown.table = function (buffer, item)
 				local visible_width = visible_texts.rows[r][c];
 				local column_width  = col_widths[c];
 
+				render_cell_content(
+					range.row_start + (r + 1),
+					part,
+					rendered_texts.rows[r][c]
+				);
+
 				if strict then
 					local before = string.match(part.text, "^%s*");
 					local after = string.match(part.text, "%s*$");
@@ -2490,6 +2658,12 @@ markdown.table = function (buffer, item)
 		elseif part.class == "column" then
 			local visible_width = visible_texts.rows[#visible_texts.rows][c];
 			local column_width  = col_widths[c];
+
+			render_cell_content(
+				range.row_end - 1,
+				part,
+				rendered_texts.rows[#rendered_texts.rows][c]
+			);
 
 			if strict then
 				local before = string.match(part.text, "^%s*");
@@ -2789,10 +2963,14 @@ end
 --- Renders markdown preview.
 ---@param buffer integer
 ---@param content markview.parsed.markdown[]
+---@param _ table?
+---@param parsed_content markview.parsed?
 ---@return markview.parsed
-markdown.render = function (buffer, content)
+markdown.render = function (buffer, content, _, parsed_content)
 	require("markview.table_overflow").restore(buffer);
 	markdown.cache = {};
+	markdown.inline_content[buffer] = parsed_content and parsed_content.markdown_inline or {};
+	markdown.projected_table_ranges[buffer] = {};
 
 	local custom = spec.get({ "renderers" }, { fallback = {} });
 
@@ -2819,6 +2997,7 @@ markdown.render = function (buffer, content)
 		end
 	end
 
+	markdown.inline_content[buffer] = nil;
 	return { markdown = markdown.cache };
 end
 
@@ -2864,6 +3043,10 @@ end
 ---@param to integer?
 ---@param hybrid_mode boolean
 markdown.clear = function (buffer, from, to, hybrid_mode)
+	if (from == nil or from == 0) and (to == nil or to == -1) then
+		markdown.projected_table_ranges[buffer] = nil;
+	end
+
 	---@type boolean
 	local experimental = spec.get({ "experimental", "linewise_ignore_org_indent" }, { fallback = false });
 

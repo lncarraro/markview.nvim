@@ -427,20 +427,34 @@ renderer.render = function (buffer, parsed_content)
 
 	---|fE
 
-	for lang, content in pairs(parsed_content) do
-		---@cast lang string
-		---@cast content
-		---| markview.parsed.html[]
-		---| markview.parsed.html[]
-		---| markview.parsed.latex[]
-		---| markview.parsed.markdown[]
-		---| markview.parsed.markdown_inline[]
-		---| markview.parsed.typst[]
-		---| markview.parsed.yaml[]
+	local rendered_languages = {};
 
-		if _renderers[lang] then
-			local c = _renderers[lang].render(buffer, content, lang == "markdown_inline" and heading_ranges or nil);
-			renderer.cache = vim.tbl_extend("force", renderer.cache, c or {});
+	local function render_language (lang)
+		local content = parsed_content[lang];
+
+		if not content or not _renderers[lang] then
+			return;
+		end
+
+		local c = _renderers[lang].render(
+			buffer,
+			content,
+			lang == "markdown_inline" and heading_ranges or nil,
+			parsed_content
+		);
+		renderer.cache = vim.tbl_extend("force", renderer.cache, c or {});
+		rendered_languages[lang] = true;
+	end
+
+	--- Markdown tables must register projected horizontal rows before inline
+	--- renderers run, otherwise inline extmarks can be added to concealed source
+	--- lines and reintroduce column drift.
+	render_language("markdown");
+	render_language("markdown_inline");
+
+	for lang, _ in pairs(parsed_content) do
+		if not rendered_languages[lang] then
+			render_language(lang);
 		end
 	end
 

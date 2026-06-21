@@ -5,6 +5,7 @@ local utils = require("markview.utils");
 local entities = require("markview.entities");
 
 local symbols = require("markview.symbols");
+local dbg = require("markview.debug");
 
 inline.ns = vim.api.nvim_create_namespace("markview/inline");
 
@@ -1141,6 +1142,14 @@ inline.render = function (buffer, content, heading_lines)
 	for _, item in ipairs(content or {}) do
 		local success, err;
 
+		if require("markview.renderers.markdown").is_projected_table_range(buffer, item.range) then
+			dbg.log("table-projection", ("source_row=%d class=%s → inline skipped (owned by projected table row)"):format(
+				item.range and item.range.row_start or -1,
+				tostring(item.class)
+			));
+			goto continue;
+		end
+
 		if custom[item.class] then
 			success, err = pcall(custom[item.class], inline.ns, buffer, item, heading_lines);
 		else
@@ -1159,6 +1168,8 @@ inline.render = function (buffer, content, heading_lines)
 				}
 			});
 		end
+
+		::continue::
 	end
 end
 
