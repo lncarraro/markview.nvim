@@ -72,6 +72,15 @@ end
 
 md_str.buffer = -1;
 
+local _log_path = vim.fn.stdpath("state") .. "/markview_debug.log";
+md_str._dbg = function (msg)
+	local f = io.open(_log_path, "a");
+	if f then
+		f:write(os.date("%H:%M:%S") .. " " .. msg .. "\n");
+		f:close();
+	end
+end;
+
 ---@param match string
 ---@return string
 md_str.autolink = function (match)
@@ -404,18 +413,26 @@ md_str.code = function (match)
 			text = { match },
 		});
 
-		return table.concat({
-			config.corner_left or "",
-			config.padding_left or "",
-
-			config.icon or "",
-			removed,
-
-			config.padding_right or "",
-			config.corner_right or "",
+		local decorated = table.concat({
+			config.corner_left or "", config.padding_left or "",
+			config.icon or "", removed,
+			config.padding_right or "", config.corner_right or "",
 		}, "");
+
+		md_str._dbg(("code span (enabled): raw=%q stripped=%q decorated=%q w_raw=%d w_dec=%d"):format(
+			match, removed, decorated,
+			vim.fn.strdisplaywidth(match), vim.fn.strdisplaywidth(decorated)
+		));
+
+		return decorated;
 	else
-		return removed;
+		-- Rendering is disabled: backticks are NOT concealed by the inline renderer,
+		-- so they remain visible on-screen. Return the full match so the table
+		-- column-width measurement matches the actual visual width.
+		md_str._dbg(("code span (disabled): raw=%q → returning full match (w=%d)"):format(
+			match, vim.fn.strdisplaywidth(match)
+		));
+		return match;
 	end
 
 	---|fE
