@@ -8,6 +8,8 @@ Used for width calculations.
 ]]
 local md_str = {};
 
+local dbg = require("markview.debug");
+
 local function eval(tbl, ignore, ...)
 	---|fS
 
@@ -72,14 +74,7 @@ end
 
 md_str.buffer = -1;
 
-local _log_path = vim.fn.stdpath("state") .. "/markview_debug.log";
-md_str._dbg = function (msg)
-	local f = io.open(_log_path, "a");
-	if f then
-		f:write(os.date("%H:%M:%S") .. " " .. msg .. "\n");
-		f:close();
-	end
-end;
+md_str._dbg = function (msg) dbg.log("tostring", msg) end;
 
 ---@param match string
 ---@return string
