@@ -174,6 +174,7 @@ autocmds.modeChanged = function (args)
 			actions.render(args.buf);
 		else
 			actions.autocmd("on_mode_change", args.buf, vim.fn.win_findbuf(args.buf), vim.fn.mode());
+			require("markview.table_overflow").restore(args.buf);
 			actions.clear(args.buf);
 		end
 
@@ -276,7 +277,12 @@ end
 autocmds.optionSet = function (args)
 	---|fS
 
-	if vim.v.option_old == vim.v.option_new then
+	if
+		args.match == "wrap" and
+		vim.w[vim.api.nvim_get_current_win()].__mkv_table_overflow_updating == true
+	then
+		return;
+	elseif vim.v.option_old == vim.v.option_new then
 		return;
 	end
 
@@ -367,6 +373,7 @@ autocmds.cursor = function (args)
 		elseif p_now then
 			actions.render(args.buf);
 		else
+			require("markview.table_overflow").restore(args.buf);
 			actions.clear(args.buf);
 		end
 
@@ -510,6 +517,7 @@ autocmds.setup = function ()
 		"BufDelete", "BufWipeout"
 	}, {
 		callback = function(args)
+			require("markview.table_overflow").restore(args.buf);
 			require("markview.state").detach(args.buf, true);
 		end
 	});

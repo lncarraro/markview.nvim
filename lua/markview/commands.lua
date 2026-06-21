@@ -4,6 +4,7 @@ commands.Start = function ()
 	require("markview.state").enable(true);
 end
 commands.Stop = function ()
+	require("markview.table_overflow").restore_all();
 	require("markview.state").enable(false);
 end
 
@@ -43,6 +44,7 @@ end
 
 commands.clear = function (buffer)
 	buffer = buffer or vim.api.nvim_get_current_buf();
+	require("markview.table_overflow").restore(buffer);
 	require("markview.actions").clear(buffer);
 end
 commands.render = function (buffer)
@@ -55,6 +57,7 @@ commands.Clear = function ()
 	local actions = require("markview.actions");
 
 	actions.forEach(function (b)
+		require("markview.table_overflow").restore(b);
 		actions.clear(b);
 	end, require("markview.state").get_attached_buffers());
 end

@@ -385,6 +385,7 @@ end
 actions.clean = function ()
 	---|fS
 
+	require("markview.table_overflow").restore_all();
 	require("markview.state").clean(nil, function ()
 		-- NOTE: If the buffer is being previewed in a `split view` we should close the split view window.
 		actions.splitClose();
@@ -548,6 +549,7 @@ actions.attach = function (buffer, _state)
 		end
 	else
 		actions.reset_query(buffer);
+		require("markview.table_overflow").restore(buffer);
 		actions.clear(buffer);
 
 		actions.autocmd("on_disable", buffer, vim.fn.win_findbuf(buffer))
@@ -581,6 +583,7 @@ actions.detach = function (buffer)
 
 		NOTE: The `state` should be kept in case we need to reuse them later.
 	]]
+	require("markview.table_overflow").restore(buffer);
 	require("markview.state").detach(buffer, false);
 	actions.clear(buffer);
 	require("markview.health").print({ kind = "skip", back = true });
@@ -722,6 +725,7 @@ actions.disable = function (buffer)
 		end
 	end
 
+	require("markview.table_overflow").restore(buffer);
 	actions.clear(buffer);
 	actions.autocmd("on_disable", buffer, vim.fn.win_findbuf(buffer))
 
@@ -890,6 +894,7 @@ actions.splitOpen = function (buffer)
 	state.set_splitview_source(buffer);
 
 	actions.splitview_setup();
+	require("markview.table_overflow").restore(buffer);
 	actions.clear(buffer);
 
 	actions.autocmd("on_splitview_open", buffer, state.get_splitview_buffer(), state.get_splitview_window());
@@ -912,6 +917,7 @@ actions.splitClose = function ()
 	local sp_win = state.get_splitview_window({}, false);
 
 	actions.autocmd("on_splitview_close", src, sp_buf, sp_win);
+	require("markview.table_overflow").restore_window(sp_win);
 	pcall(vim.api.nvim_win_close, sp_win, true);
 
 	state.set_splitview_source(nil);

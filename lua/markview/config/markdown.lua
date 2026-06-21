@@ -622,6 +622,7 @@ return {
 	tables = {
 		enable = true,
 		strict = false,
+		overflow = "horizontal",
 
 		block_decorator = true,
 		use_virt_lines = false,

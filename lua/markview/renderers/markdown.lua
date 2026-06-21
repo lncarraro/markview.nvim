@@ -1527,6 +1527,16 @@ markdown.table = function (buffer, item)
 	local range = item.range;
 
 	local is_wrapped = false;
+	local check_overflow = false;
+	local overflow_mode = config and config.overflow or "horizontal";
+
+	if overflow_mode ~= "horizontal" and overflow_mode ~= "raw" then
+		dbg.log("table", ("row=%d invalid overflow mode=%q → using horizontal"):format(
+			range.row_start,
+			tostring(overflow_mode)
+		));
+		overflow_mode = "horizontal";
+	end
 
 	if not config then
 		return;
@@ -1537,9 +1547,13 @@ markdown.table = function (buffer, item)
 			--- Window doesn't exist.
 			return;
 		elseif vim.wo[win].wrap == true then
-			--- BUG, wrap breaks table rendering.
-			is_wrapped = true;
-			dbg.log("table", ("row=%d wrap=true → entering wrap-width guard"):format(range.row_start));
+			check_overflow = true;
+			is_wrapped = overflow_mode == "raw";
+			dbg.log("table", ("row=%d wrap=true → entering width guard (overflow_mode=%s; wrapped_renderer=%s)"):format(
+				range.row_start,
+				overflow_mode,
+				tostring(is_wrapped)
+			));
 		end
 
 		local left_col;
@@ -1550,7 +1564,11 @@ markdown.table = function (buffer, item)
 			left_col = vim.fn.winsaveview().leftcol;
 		end)
 
-		if type(left_col) == "number" and left_col > range.col_start then
+		if
+			overflow_mode == "raw" and
+			type(left_col) == "number" and
+			left_col > range.col_start
+		then
 			return;
 		end
 	end
@@ -1575,30 +1593,54 @@ markdown.table = function (buffer, item)
 		rows = {}
 	};
 
-	---@type integer[] Invisible width used for text wrapping in Neovim.
-	local vim_width = {};
+	---@type integer[] Maximum raw Markdown display widths, retained for diagnostics.
+	local raw_widths = {};
+
+	local md_tostring = require("markview.renderers.markdown.tostring");
+
+	--- Measures one table cell using the same rendered representation used by
+	--- the table alignment code. Raw Markdown width is retained only so the
+	--- debug log can expose syntax concealed by the inline renderer.
+	---@param section string
+	---@param source_row integer
+	---@param column integer
+	---@param text string
+	---@param render_inline boolean
+	---@return integer
+	local function measure_cell (section, source_row, column, text, render_inline)
+		local rendered = render_inline and md_tostring.tostring(buffer, text) or text;
+		local rendered_width = vim.fn.strdisplaywidth(rendered);
+		local raw_width = vim.fn.strdisplaywidth(text);
+
+		if not col_widths[column] or col_widths[column] < rendered_width then
+			col_widths[column] = rendered_width;
+		end
+
+		if not raw_widths[column] or raw_widths[column] < raw_width then
+			raw_widths[column] = raw_width;
+		end
+
+		dbg.log("table-width", ("table_row=%d section=%s source_row=%d column=%d raw=%q rendered=%q raw_width=%d rendered_width=%d"):format(
+			range.row_start,
+			section,
+			source_row,
+			column,
+			text,
+			rendered,
+			raw_width,
+			rendered_width
+		));
+
+		return rendered_width;
+	end
 
 	---@type integer Current column number.
 	local c = 1;
 
 	for _, col in ipairs(item.header) do
 		if col.class == "column" then
-			local _o = require("markview.renderers.markdown.tostring").tostring(buffer, col.text);
-			local o = vim.fn.strdisplaywidth(_o);
-
-			table.insert(visible_texts.header, o);
-
-			if not col_widths[c] or col_widths[c] < o then
-				col_widths[c] = o;
-			end
-
-			local vim_col_width = vim.fn.strdisplaywidth(col.text);
-
-			if not vim_width[c] then
-				vim_width[c] = vim_col_width;
-			elseif vim_col_width > vim_width[c] then
-				vim_width[c] = vim_col_width;
-			end
+			local width = measure_cell("header", range.row_start, c, col.text, true);
+			table.insert(visible_texts.header, width);
 
 			c = c + 1;
 		end
@@ -1608,20 +1650,7 @@ markdown.table = function (buffer, item)
 
 	for _, col in ipairs(item.separator) do
 		if col.class == "column" then
-			local o = vim.fn.strdisplaywidth(col.text);
-
-			if not col_widths[c] or col_widths[c] < o then
-				col_widths[c] = o;
-			end
-
-			local vim_col_width = vim.fn.strdisplaywidth(col.text);
-
-			if not vim_width[c] then
-				vim_width[c] = vim_col_width;
-			elseif vim_col_width > vim_width[c] then
-				vim_width[c] = vim_col_width;
-			end
-
+			measure_cell("separator", range.row_start + 1, c, col.text, false);
 			c = c + 1;
 		end
 	end
@@ -1632,54 +1661,86 @@ markdown.table = function (buffer, item)
 
 		for _, col in ipairs(row) do
 			if col.class == "column" then
-				local _o = require("markview.renderers.markdown.tostring").tostring(buffer, col.text);
-				local o = vim.fn.strdisplaywidth(_o);
-
-				table.insert(visible_texts.rows[r], o);
-
-				if not col_widths[c] or col_widths[c] < o then
-					col_widths[c] = o;
-				end
-
-				local vim_col_width = vim.fn.strdisplaywidth(col.text);
-
-				if not vim_width[c] then
-					vim_width[c] = vim_col_width;
-				elseif vim_col_width > vim_width[c] then
-					vim_width[c] = vim_col_width;
-				end
+				local width = measure_cell("row", range.row_start + 1 + r, c, col.text, true);
+				table.insert(visible_texts.rows[r], width);
 
 				c = c + 1;
 			end
 		end
 	end
 
-	if is_wrapped == true then
+	if check_overflow == true then
 		local win = utils.buf_getwin(buffer);
-		local width = vim.api.nvim_win_get_width(win);
+		local win_width = vim.api.nvim_win_get_width(win);
+		local win_info = vim.fn.getwininfo(win)[1] or {};
+		local text_width = math.max(1, win_width - (win_info.textoff or 0));
 
-		local table_width = 1;
+		local rendered_table_width = 1;
+		local raw_table_width = 1;
 
-		for _, col in ipairs(vim_width) do
-			table_width = table_width + 1 + col;
+		for column = 1, #col_widths do
+			rendered_table_width = rendered_table_width + 1 + col_widths[column];
+			raw_table_width = raw_table_width + 1 + (raw_widths[column] or col_widths[column]);
 		end
 
-		dbg.log("table", ("row=%d wrap-guard: table_width=%d win_width=%d threshold=%.1f vim_widths=[%s]"):format(
+		local available_width = math.max(1, text_width - range.col_start);
+		local overflow = math.max(0, rendered_table_width - available_width);
+
+		dbg.log("table", ("row=%d wrap-guard: rendered_table_width=%d raw_table_width=%d win_width=%d text_width=%d available_width=%d table_indent=%d textoff=%d overflow=%d rendered_widths=[%s] raw_widths=[%s]"):format(
 			range.row_start,
-			table_width,
-			width,
-			width * 0.9,
-			table.concat(vim_width, ", ")
+			rendered_table_width,
+			raw_table_width,
+			win_width,
+			text_width,
+			available_width,
+			range.col_start,
+			win_info.textoff or 0,
+			overflow,
+			table.concat(col_widths, ", "),
+			table.concat(raw_widths, ", ")
 		));
 
-		if table_width >= width * 0.9 then
-			--- Most likely the text was wrapped somewhere.
-			--- TODO, Check if a more accurate(& faster) method exists or not.
-			dbg.log("table", ("row=%d → ABORTED (table_width=%d >= threshold=%.1f)"):format(
-				range.row_start, table_width, width * 0.9
+		if rendered_table_width > available_width then
+			if overflow_mode == "raw" then
+				dbg.log("table", ("row=%d → RAW_FALLBACK (configured overflow=raw; rendered_table_width=%d > available_width=%d; overflow=%d; raw_table_width=%d ignored for decision)"):format(
+					range.row_start,
+					rendered_table_width,
+					available_width,
+					overflow,
+					raw_table_width
+				));
+				return;
+			end
+
+			if not require("markview.table_overflow").enable_horizontal(buffer, win) then
+				dbg.log("table", ("row=%d → RAW_FALLBACK (horizontal mode could not update window=%s)"):format(
+					range.row_start,
+					tostring(win)
+				));
+				return;
+			end
+
+			--- Horizontal mode renders the normal, natural-width table with wrapping
+			--- disabled only for this window. Neovim can then scroll horizontally
+			--- without losing or truncating cell content.
+			is_wrapped = false;
+			dbg.log("table", ("row=%d → HORIZONTAL (rendered_table_width=%d > available_width=%d; overflow=%d; window=%d wrap=false)"):format(
+				range.row_start,
+				rendered_table_width,
+				available_width,
+				overflow,
+				win
 			));
-			return;
 		end
+
+		dbg.log("table", ("row=%d → RENDERING (rendered_table_width=%d; available_width=%d; remaining=%d; overflow_mode=%s; raw_table_width=%d)"):format(
+			range.row_start,
+			rendered_table_width,
+			available_width,
+			math.max(0, available_width - rendered_table_width),
+			rendered_table_width > available_width and "horizontal" or "fit",
+			raw_table_width
+		));
 	end
 
 	---@type markview.config.markdown.tables.parts
@@ -2730,6 +2791,7 @@ end
 ---@param content markview.parsed.markdown[]
 ---@return markview.parsed
 markdown.render = function (buffer, content)
+	require("markview.table_overflow").restore(buffer);
 	markdown.cache = {};
 
 	local custom = spec.get({ "renderers" }, { fallback = {} });

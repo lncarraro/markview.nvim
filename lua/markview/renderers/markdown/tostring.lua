@@ -109,7 +109,7 @@ md_str.autolink = function (match)
 			config.corner_right or "",
 		}, "");
 	else
-		return md_str.tostring(md_str.buffer, removed, false);
+		return match;
 	end
 
 	---|fE
@@ -150,7 +150,7 @@ md_str.block_ref = function (match)
 			config.corner_right or "",
 		}, "");
 	else
-		return removed;
+		return match;
 	end
 
 	---|fE
@@ -236,7 +236,7 @@ md_str.embed = function (match)
 			config.corner_right or "",
 		}, "");
 	else
-		return removed;
+		return match;
 	end
 
 	---|fE
@@ -319,7 +319,7 @@ md_str.internal = function (match)
 			config.corner_right or "",
 		}, "");
 	else
-		return removed;
+		return match;
 	end
 
 	---|fE
@@ -360,7 +360,7 @@ md_str.footnote = function (match)
 		end
 	end
 
-	return label;
+	return match;
 
 	---|fE
 end
@@ -368,6 +368,10 @@ end
 ---@param match string
 ---@return string
 md_str.escape = function (match)
+	if not md_str.cached_config or not md_str.cached_config.escapes then
+		return match;
+	end
+
 	local char = string.match(match, "\\(.)");
 	return char;
 end
@@ -465,7 +469,7 @@ md_str.email = function (match)
 			config.corner_right or "",
 		}, "");
 	else
-		return removed;
+		return match;
 	end
 
 	---|fE
@@ -501,7 +505,7 @@ md_str.highlight = function (match)
 			config.corner_right or "",
 		}, "");
 	else
-		return removed;
+		return match;
 	end
 
 	---|fE
@@ -540,7 +544,7 @@ md_str.hyperlink_no_src = function (match)
 			config.corner_right or "",
 		}, "");
 	else
-		return removed;
+		return match;
 	end
 
 	---|fE
@@ -580,7 +584,7 @@ md_str.hyperlink_src = function (match)
 			config.corner_right or "",
 		}, "");
 	else
-		return removed;
+		return match;
 	end
 
 	---|fE
@@ -619,7 +623,7 @@ md_str.img_no_src = function (match)
 			config.corner_right or "",
 		}, "");
 	else
-		return removed;
+		return match;
 	end
 
 	---|fE
@@ -657,7 +661,7 @@ md_str.img_src = function (match)
 			config.corner_right or "",
 		}, "");
 	else
-		return removed;
+		return match;
 	end
 
 	---|fE
