@@ -3,6 +3,7 @@ local inline = require("markview.renderers.markdown_inline");
 
 local spec = require("markview.spec");
 local utils = require("markview.utils");
+local dbg = require("markview.debug");
 
 local filetypes = require("markview.filetypes");
 
@@ -1538,6 +1539,7 @@ markdown.table = function (buffer, item)
 		elseif vim.wo[win].wrap == true then
 			--- BUG, wrap breaks table rendering.
 			is_wrapped = true;
+			dbg.log("table", ("row=%d wrap=true → entering wrap-width guard"):format(range.row_start));
 		end
 
 		local left_col;
@@ -1662,9 +1664,20 @@ markdown.table = function (buffer, item)
 			table_width = table_width + 1 + col;
 		end
 
+		dbg.log("table", ("row=%d wrap-guard: table_width=%d win_width=%d threshold=%.1f vim_widths=[%s]"):format(
+			range.row_start,
+			table_width,
+			width,
+			width * 0.9,
+			table.concat(vim_width, ", ")
+		));
+
 		if table_width >= width * 0.9 then
 			--- Most likely the text was wrapped somewhere.
 			--- TODO, Check if a more accurate(& faster) method exists or not.
+			dbg.log("table", ("row=%d → ABORTED (table_width=%d >= threshold=%.1f)"):format(
+				range.row_start, table_width, width * 0.9
+			));
 			return;
 		end
 	end
