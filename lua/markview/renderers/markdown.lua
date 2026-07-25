@@ -1636,7 +1636,7 @@ markdown.table = function (buffer, item)
 	end
 
 	---@type boolean
-	local strict = config.strict ~= nil and config.strict or true;
+	local strict = config.strict == nil and true or config.strict;
 
 	if item.has_alignment_markers == false then
 		-- Disable strict mode if no alignment
