@@ -313,6 +313,7 @@
 ---@field enable boolean
 ---@field strict boolean When `true`, leading & trailing whitespaces are not considered part of the cell.
 ---@field overflow? "horizontal" | "raw" Behavior when the rendered table is wider than the available text area.
+---@field padding_bottom? integer Number of virtual blank lines shown after the rendered table.
 ---
 ---@field block_decorator boolean Whether to draw top & bottom border.
 ---@field use_virt_lines boolean Whether to use virtual lines for the borders.
@@ -335,4 +336,3 @@
 ---@field bottom string[]
 ---
 ---@field overlap string[]
-

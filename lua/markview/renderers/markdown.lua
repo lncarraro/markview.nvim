@@ -1546,6 +1546,39 @@ markdown.setext_heading = function (buffer, item)
 	end
 end
 
+--- Adds virtual lines between a rendered table and the content that follows it.
+---@param buffer integer
+---@param item markview.parsed.markdown.tables
+---@param amount integer?
+markdown.table_bottom_padding = function (buffer, item, amount)
+	local padding = math.max(0, math.floor(tonumber(amount) or 0));
+
+	if padding == 0 then
+		return;
+	end
+
+	local range = item.range;
+	local line_count = vim.api.nvim_buf_line_count(buffer);
+	local anchor = item.bottom_border == true and range.row_end or range.row_end - 1;
+
+	-- Padding is only useful when there is content after the table.
+	if anchor < 0 or anchor >= line_count - 1 then
+		return;
+	end
+
+	local virt_lines = {};
+
+	for _ = 1, padding do
+		table.insert(virt_lines, { { " " } });
+	end
+
+	vim.api.nvim_buf_set_extmark(buffer, markdown.ns, anchor, 0, {
+		undo_restore = false,
+		invalidate = true,
+		virt_lines = virt_lines,
+	});
+end
+
 --- Renders tables.
 ---@param buffer integer
 ---@param item markview.parsed.markdown.tables
@@ -1799,6 +1832,8 @@ markdown.table = function (buffer, item)
 			col_widths,
 			strict
 		);
+
+		markdown.table_bottom_padding(buffer, item, config.padding_bottom);
 
 		dbg.log("table", ("row=%d → PROJECTED_ROWS (source range=%d:%d)"):format(
 			range.row_start,
@@ -2747,6 +2782,8 @@ markdown.table = function (buffer, item)
 			c = c + 1;
 		end
 	end
+
+	markdown.table_bottom_padding(buffer, item, config.padding_bottom);
 end
 
 
