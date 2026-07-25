@@ -3005,6 +3005,7 @@ end
 ---@return markview.parsed
 markdown.render = function (buffer, content, _, parsed_content)
 	require("markview.table_overflow").restore(buffer);
+	require("markview.renderers.markdown.table_projection").clear(buffer);
 	markdown.cache = {};
 	markdown.inline_content[buffer] = parsed_content and parsed_content.markdown_inline or {};
 	markdown.projected_table_ranges[buffer] = {};
@@ -3080,6 +3081,8 @@ end
 ---@param to integer?
 ---@param hybrid_mode boolean
 markdown.clear = function (buffer, from, to, hybrid_mode)
+	require("markview.renderers.markdown.table_projection").clear(buffer, from, to);
+
 	if (from == nil or from == 0) and (to == nil or to == -1) then
 		markdown.projected_table_ranges[buffer] = nil;
 	end

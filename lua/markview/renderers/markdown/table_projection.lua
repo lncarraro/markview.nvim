@@ -3,6 +3,102 @@ local projection = {};
 local dbg = require("markview.debug");
 local utils = require("markview.utils");
 
+local namespace = vim.api.nvim_create_namespace("markview/markdown/table-projection");
+
+---@type table<integer, table<integer, { chunks: table[], display_col_start: integer }>>
+local projected_rows = {};
+---@type table<integer, integer>
+local window_leftcols = {};
+
+--- Removes {width} display cells from the start of a virtual text value.
+---@param chunks table[]
+---@param width integer
+---@param display_col_start integer
+---@return table[]
+local function trim_chunks (chunks, width, display_col_start)
+	if width <= 0 then
+		return chunks;
+	end
+
+	local trimmed = {};
+	local consumed = 0;
+
+	for index, chunk in ipairs(chunks) do
+		local text = chunk[1] or "";
+		local chunk_width = vim.fn.strdisplaywidth(text, display_col_start + consumed);
+
+		if consumed + chunk_width <= width then
+			consumed = consumed + chunk_width;
+		else
+			local start = 0;
+			local char_count = vim.fn.strchars(text, true);
+
+			while start < char_count and consumed < width do
+				local char = vim.fn.strcharpart(text, start, 1, true);
+				consumed = consumed + vim.fn.strdisplaywidth(
+					char,
+					display_col_start + consumed
+				);
+				start = start + 1;
+			end
+
+			local remainder = string.rep(" ", math.max(0, consumed - width)) ..
+				vim.fn.strcharpart(text, start, char_count - start, true);
+
+			if remainder ~= "" then
+				table.insert(trimmed, { remainder, chunk[2] });
+			end
+
+			for tail = index + 1, #chunks do
+				table.insert(trimmed, chunks[tail]);
+			end
+
+			break;
+		end
+	end
+
+	return trimmed;
+end
+
+vim.api.nvim_set_decoration_provider(namespace, {
+	on_win = function (_, window, buffer)
+		if not projected_rows[buffer] then
+			return false;
+		end
+
+		local info = vim.fn.getwininfo(window)[1] or {};
+		window_leftcols[window] = info.leftcol or 0;
+	end,
+
+	on_line = function (_, window, buffer, row)
+		local projected = projected_rows[buffer] and projected_rows[buffer][row];
+
+		if not projected then
+			return;
+		end
+
+		local leftcol = window_leftcols[window] or 0;
+		local hidden_width = math.max(0, leftcol - projected.display_col_start);
+		local chunks = trim_chunks(
+			projected.chunks,
+			hidden_width,
+			projected.display_col_start
+		);
+
+		if #chunks == 0 then
+			return;
+		end
+
+		vim.api.nvim_buf_set_extmark(buffer, namespace, row, 0, {
+			ephemeral = true,
+			virt_text = chunks,
+			virt_text_win_col = math.max(0, projected.display_col_start - leftcol),
+			priority = 1000,
+			hl_mode = "replace"
+		});
+	end
+});
+
 local function part (config, kind, index)
 	local text = config.parts and config.parts[kind] and config.parts[kind][index] or "";
 	local hl = config.hl and config.hl[kind] and config.hl[kind][index] or nil;
@@ -136,7 +232,11 @@ end
 local function project_source_row (buffer, namespace, table_row, source_row, col_start, kind, chunks)
 	local line = vim.api.nvim_buf_get_lines(buffer, source_row, source_row + 1, false)[1] or "";
 	local anchor = math.min(col_start, #line);
-	local source_width = vim.fn.strdisplaywidth(string.sub(line, anchor + 1));
+	local display_col_start = vim.fn.strdisplaywidth(string.sub(line, 1, anchor));
+	local source_width = vim.fn.strdisplaywidth(
+		string.sub(line, anchor + 1),
+		display_col_start
+	);
 	local projected_width = utils.virt_len(chunks);
 	local mask_width = math.max(0, source_width - projected_width);
 	local overlay = vim.deepcopy(chunks);
@@ -145,22 +245,18 @@ local function project_source_row (buffer, namespace, table_row, source_row, col
 		table.insert(overlay, { string.rep(" ", mask_width) });
 	end
 
-	vim.api.nvim_buf_set_extmark(buffer, namespace, source_row, anchor, {
-		undo_restore = false,
-		invalidate = true,
-		virt_text_pos = "overlay",
-		virt_text = overlay,
-		virt_text_hide = false,
-		priority = 1000,
-		right_gravity = false,
-		hl_mode = "replace"
-	});
+	projected_rows[buffer] = projected_rows[buffer] or {};
+	projected_rows[buffer][source_row] = {
+		chunks = overlay,
+		display_col_start = display_col_start
+	};
 
-	dbg.log("table-projection", ("table_row=%d source_row=%d kind=%s mode=overlay anchor=%d source_bytes=%d source_width=%d projected_width=%d mask_width=%d"):format(
+	dbg.log("table-projection", ("table_row=%d source_row=%d kind=%s mode=window-overlay anchor=%d display_col_start=%d source_bytes=%d source_width=%d projected_width=%d mask_width=%d"):format(
 		table_row,
 		source_row,
 		kind,
 		anchor,
+		display_col_start,
 		#line,
 		source_width,
 		projected_width,
@@ -190,18 +286,13 @@ local function project_border (buffer, namespace, table_row, source_row, col_sta
 		table.insert(projected, { string.rep(" ", mask_width) });
 	end
 
-	vim.api.nvim_buf_set_extmark(buffer, namespace, source_row, 0, {
-		undo_restore = false,
-		invalidate = true,
-		virt_text_pos = "overlay",
-		virt_text = projected,
-		virt_text_hide = false,
-		priority = 1000,
-		right_gravity = false,
-		hl_mode = "replace"
-	});
+	projected_rows[buffer] = projected_rows[buffer] or {};
+	projected_rows[buffer][source_row] = {
+		chunks = projected,
+		display_col_start = 0
+	};
 
-	dbg.log("table-projection", ("table_row=%d source_row=%d kind=%s mode=overlay anchor=0 source_bytes=%d source_width=%d projected_width=%d mask_width=%d"):format(
+	dbg.log("table-projection", ("table_row=%d source_row=%d kind=%s mode=window-overlay anchor=0 source_bytes=%d source_width=%d projected_width=%d mask_width=%d"):format(
 		table_row,
 		source_row,
 		kind,
@@ -210,6 +301,28 @@ local function project_border (buffer, namespace, table_row, source_row, col_sta
 		projected_width,
 		mask_width
 	));
+end
+
+---@param buffer integer
+---@param from integer?
+---@param to integer?
+projection.clear = function (buffer, from, to)
+	if not projected_rows[buffer] then
+		return;
+	elseif from == nil or (from == 0 and (to == nil or to == -1)) then
+		projected_rows[buffer] = nil;
+		return;
+	end
+
+	for row, _ in pairs(projected_rows[buffer]) do
+		if row >= from and (to == nil or to == -1 or row < to) then
+			projected_rows[buffer][row] = nil;
+		end
+	end
+
+	if vim.tbl_isempty(projected_rows[buffer]) then
+		projected_rows[buffer] = nil;
+	end
 end
 
 ---@param buffer integer
